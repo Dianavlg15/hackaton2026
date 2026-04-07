@@ -1,1 +1,1 @@
-# hackaton2026
+# Participación de Sylestudio en el hackaton Genius Area
