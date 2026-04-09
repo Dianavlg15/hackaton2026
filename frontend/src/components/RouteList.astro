@@ -1,51 +1,46 @@
 ---
-// Rutas optimizadas — se generan llamando al backend
 ---
-
-<div class="bg-eco-bg-panel border border-eco-border rounded-xl p-4 flex flex-col gap-3">
+<div class="card p-5 flex flex-col gap-4">
   <div class="flex items-center justify-between">
-    <h2 class="text-sm font-medium text-eco-text-secondary uppercase tracking-wide">Rutas optimizadas</h2>
-    <button
-      id="optimize-btn"
-      class="text-xs px-3 py-1 rounded-lg bg-eco-green text-white font-medium active:scale-95 transition-transform"
-    >
+    <div class="flex items-center gap-2">
+      <span class="w-1.5 h-1.5 rounded-full bg-eco-green"></span>
+      <h2 class="text-xs font-medium text-eco-text-secondary uppercase tracking-widest">Rutas optimizadas</h2>
+    </div>
+    <button id="optimize-btn"
+      class="text-xs mono px-3 py-1.5 rounded-lg bg-eco-green text-black font-medium hover:bg-eco-green-light active:scale-95 transition-all">
       Generar rutas
     </button>
   </div>
   <ul id="route-list" class="flex flex-col gap-2">
-    <li class="text-xs text-eco-text-secondary">Presiona "Generar rutas" para calcular.</li>
+    <li class="text-xs text-eco-text-muted">Presiona "Generar rutas" para calcular con IA.</li>
   </ul>
 </div>
 
 <script>
   document.getElementById('optimize-btn')!.addEventListener('click', async () => {
     const list = document.getElementById('route-list')!;
-    const btn  = document.getElementById('optimize-btn') as HTMLButtonElement;
+    const btn = document.getElementById('optimize-btn') as HTMLButtonElement;
     btn.textContent = 'Calculando...';
     btn.disabled = true;
-    list.innerHTML = '<li class="text-xs text-eco-text-secondary">Calculando rutas con IA...</li>';
+    list.innerHTML = '<li class="text-xs text-eco-text-muted animate-pulse">Optimizando rutas con IA...</li>';
 
     try {
-      const API = import.meta.env.PUBLIC_API_URL ?? 'http://localhost:8000';
-      const res = await fetch(`${API}/api/v1/routes/optimize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch('http://localhost:8000/api/v1/routes/optimize', { method: 'POST' });
       const data = await res.json();
       const routes: any[] = data.routes ?? [];
 
-      if (routes.length === 0) {
-        list.innerHTML = '<li class="text-xs text-eco-text-secondary">No hay contenedores críticos para rutear.</li>';
+      if (!routes.length) {
+        list.innerHTML = '<li class="text-xs text-eco-text-muted">No hay contenedores críticos para rutear.</li>';
         return;
       }
 
-      list.innerHTML = routes.map(r => `
-        <li class="flex items-center justify-between rounded-lg bg-eco-bg-header px-3 py-2">
+      list.innerHTML = routes.map((r, i) => `
+        <li class="flex items-center justify-between rounded-lg bg-eco-bg-header border border-eco-border px-4 py-3 gap-3 animate-fade-up" style="animation-delay:${i * 0.08}s">
           <div>
-            <p class="text-sm font-medium text-eco-text-primary">${r.vehicle_id}</p>
-            <p class="text-xs text-eco-text-secondary">${r.total_distance_km} km · ${r.estimated_time_min} min</p>
+            <p class="mono text-sm font-medium text-eco-text-primary">${r.vehicle_id}</p>
+            <p class="text-xs text-eco-text-muted mt-0.5">${r.total_distance_km} km · ${r.estimated_time_min} min est.</p>
           </div>
-          <span class="text-xs bg-eco-green text-white px-2 py-0.5 rounded-full">${r.containers_visited} paradas</span>
+          <span class="mono text-xs bg-eco-green-dim text-eco-green px-2 py-1 rounded-md">${r.containers_visited} paradas</span>
         </li>`).join('');
     } catch {
       list.innerHTML = '<li class="text-xs text-eco-danger">Error al generar rutas</li>';

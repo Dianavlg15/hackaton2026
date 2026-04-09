@@ -1,54 +1,61 @@
 ---
-// Rendered client-side via script below
 ---
-
-<div class="bg-eco-bg-panel border border-eco-border rounded-xl p-4 flex flex-col gap-3">
-  <h2 class="text-sm font-medium text-eco-text-secondary uppercase tracking-wide">Contenedores críticos</h2>
+<div class="card p-5 flex flex-col gap-4">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="w-1.5 h-1.5 rounded-full bg-eco-danger"></span>
+      <h2 class="text-xs font-medium text-eco-text-secondary uppercase tracking-widest">Contenedores críticos</h2>
+    </div>
+    <span id="critical-count" class="mono text-xs text-eco-danger bg-eco-danger-dim px-2 py-0.5 rounded-md">—</span>
+  </div>
   <ul id="critical-list" class="flex flex-col gap-2">
-    <li class="text-xs text-eco-text-secondary">Cargando...</li>
+    <li class="text-xs text-eco-text-muted">Cargando...</li>
   </ul>
 </div>
 
 <script>
   const ZONE_COLORS: Record<string, string> = {
-    centro: 'bg-blue-100 text-blue-800',
-    norte:  'bg-purple-100 text-purple-800',
-    sur:    'bg-orange-100 text-orange-800',
+    centro: 'text-eco-info bg-eco-info-dim',
+    norte:  'text-eco-warning bg-eco-warning-dim',
+    sur:    'text-eco-green bg-eco-green-dim',
   };
 
-  async function loadCritical() {
+  async function load() {
     const list = document.getElementById('critical-list')!;
+    const count = document.getElementById('critical-count')!;
     try {
-      const API = import.meta.env.PUBLIC_API_URL ?? 'http://localhost:8000';
-      const res = await fetch(`${API}/api/v1/containers/critical?threshold=0.8`);
+      const res = await fetch('http://localhost:8000/api/v1/containers/critical?threshold=0.8');
       const data = await res.json();
       const containers: any[] = data.containers ?? [];
+      count.textContent = String(containers.length);
 
-      if (containers.length === 0) {
-        list.innerHTML = '<li class="text-xs text-eco-text-secondary">Sin contenedores críticos</li>';
+      if (!containers.length) {
+        list.innerHTML = '<li class="text-xs text-eco-text-muted">Sin contenedores críticos</li>';
         return;
       }
 
-      const sorted = containers.sort((a, b) => b.fill_level - a.fill_level);
-      list.innerHTML = sorted.map(c => {
-        const pct = Math.round(c.fill_level * 100);
-        const barColor = pct >= 90 ? 'bg-eco-danger' : 'bg-eco-warning';
-        const zoneClass = ZONE_COLORS[c.zone] ?? 'bg-gray-100 text-gray-700';
-        return `
-          <li class="flex items-center gap-2 text-sm">
-            <span class="font-medium w-20 shrink-0 text-eco-text-primary">${c.container_id}</span>
-            <div class="flex-1 h-2 bg-eco-border rounded-full overflow-hidden">
-              <div class="${barColor} h-full rounded-full" style="width:${pct}%"></div>
-            </div>
-            <span class="text-xs text-eco-text-secondary w-10 text-right shrink-0">${pct}%</span>
-            <span class="text-xs px-2 py-0.5 rounded-full shrink-0 ${zoneClass}">${c.zone}</span>
-          </li>`;
-      }).join('');
+      list.innerHTML = containers
+        .sort((a, b) => b.fill_level - a.fill_level)
+        .slice(0, 6)
+        .map(c => {
+          const pct = Math.round(c.fill_level * 100);
+          const bar = pct >= 90 ? 'bg-eco-danger' : 'bg-eco-warning';
+          const zc = ZONE_COLORS[c.zone] ?? 'text-eco-text-secondary bg-eco-bg-panel';
+          return `
+            <li class="flex items-center gap-3">
+              <span class="mono text-xs font-medium text-eco-text-primary w-20 shrink-0">${c.container_id}</span>
+              <div class="flex-1 h-1 bg-eco-border rounded-full overflow-hidden">
+                <div class="${bar} h-full rounded-full" style="width:${pct}%;animation:bar-fill 0.8s ease"></div>
+              </div>
+              <span class="mono text-xs text-eco-text-secondary w-9 text-right shrink-0">${pct}%</span>
+              <span class="text-xs px-2 py-0.5 rounded-md shrink-0 ${zc}">${c.zone}</span>
+            </li>`;
+        }).join('');
     } catch {
-      list.innerHTML = '<li class="text-xs text-eco-danger">Error al cargar datos</li>';
+      list.innerHTML = '<li class="text-xs text-eco-danger">Error al cargar</li>';
     }
   }
 
-  loadCritical();
-  setInterval(loadCritical, 10_000);
+  load();
+  setInterval(load, 10_000);
 </script>

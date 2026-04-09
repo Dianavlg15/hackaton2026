@@ -1,38 +1,42 @@
 ---
-// Reportes ciudadanos en tiempo real
 ---
-
-<div class="bg-eco-bg-panel border border-eco-border rounded-xl p-4 flex flex-col gap-3">
-  <h2 class="text-sm font-medium text-eco-text-secondary uppercase tracking-wide">Reportes ciudadanos</h2>
+<div class="card p-5 flex flex-col gap-4">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="w-1.5 h-1.5 rounded-full bg-eco-warning"></span>
+      <h2 class="text-xs font-medium text-eco-text-secondary uppercase tracking-widest">Reportes ciudadanos</h2>
+    </div>
+    <span id="report-count" class="mono text-xs text-eco-warning bg-eco-warning-dim px-2 py-0.5 rounded-md">—</span>
+  </div>
   <ul id="report-list" class="flex flex-col gap-2">
-    <li class="text-xs text-eco-text-secondary">Cargando...</li>
+    <li class="text-xs text-eco-text-muted">Cargando...</li>
   </ul>
 </div>
 
 <script>
-  async function loadReports() {
+  async function load() {
     const list = document.getElementById('report-list')!;
+    const count = document.getElementById('report-count')!;
     try {
-      const API = import.meta.env.PUBLIC_API_URL ?? 'http://localhost:8000';
-      const res  = await fetch(`${API}/api/v1/reports/citizen`);
+      const res = await fetch('http://localhost:8000/api/v1/reports/citizen');
       const data: any[] = await res.json();
+      count.textContent = String(data.length);
 
-      if (data.length === 0) {
-        list.innerHTML = '<li class="text-xs text-eco-text-secondary">Sin reportes por el momento.</li>';
+      if (!data.length) {
+        list.innerHTML = '<li class="text-xs text-eco-text-muted">Sin reportes por el momento.</li>';
         return;
       }
 
-      const recent = [...data].reverse().slice(0, 6);
-      list.innerHTML = recent.map(r => `
-        <li class="rounded-lg bg-eco-bg-header px-3 py-2">
+      list.innerHTML = [...data].reverse().slice(0, 5).map((r, i) => `
+        <li class="rounded-lg bg-eco-bg-header border border-eco-border px-4 py-3 animate-fade-up" style="animation-delay:${i * 0.06}s">
           <p class="text-sm text-eco-text-primary">${r.description}</p>
-          <p class="text-xs text-eco-text-secondary mt-0.5">Zona ${r.zone} · ${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}</p>
+          <p class="mono text-xs text-eco-text-muted mt-1 capitalize">${r.zone} · ${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}</p>
         </li>`).join('');
     } catch {
       list.innerHTML = '<li class="text-xs text-eco-danger">Error al cargar reportes</li>';
     }
   }
 
-  loadReports();
-  setInterval(loadReports, 15_000);
+  load();
+  setInterval(load, 15_000);
 </script>

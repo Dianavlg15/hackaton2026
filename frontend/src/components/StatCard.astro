@@ -8,10 +8,9 @@ interface Props {
   trend?: string;
   id?: string;
 }
-
 const { label, value, sub, color = 'default', icon, trend, id } = Astro.props;
 
-const valueClass = {
+const accent = {
   default: 'text-eco-text-primary',
   danger:  'text-eco-danger',
   warning: 'text-eco-warning',
@@ -19,27 +18,40 @@ const valueClass = {
   info:    'text-eco-info',
 }[color];
 
-const trendClass = {
-  default: 'text-eco-text-secondary',
-  danger:  'text-eco-danger',
-  warning: 'text-eco-warning',
-  success: 'text-eco-green',
-  info:    'text-eco-info',
+const dimBg = {
+  default: 'bg-eco-bg-panel',
+  danger:  'bg-eco-danger-dim',
+  warning: 'bg-eco-warning-dim',
+  success: 'bg-eco-green-dim',
+  info:    'bg-eco-info-dim',
+}[color];
+
+const dot = {
+  default: 'bg-eco-text-muted',
+  danger:  'bg-eco-danger',
+  warning: 'bg-eco-warning',
+  success: 'bg-eco-green',
+  info:    'bg-eco-info',
 }[color];
 ---
 
-<div {id} class="bg-eco-bg-panel border border-eco-border rounded-xl p-4 flex flex-col gap-1">
+<div {id} class="card p-5 flex flex-col gap-3 animate-fade-up">
   <div class="flex items-center justify-between">
-    <span class="text-xs text-eco-text-secondary uppercase tracking-wide">{label}</span>
+    <div class="flex items-center gap-2">
+      <span class={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
+      <span class="text-xs font-medium text-eco-text-secondary uppercase tracking-widest">{label}</span>
+    </div>
     {icon && (
-      <svg class="w-4 h-4 text-eco-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d={icon} />
-      </svg>
+      <div class={`w-7 h-7 rounded-lg flex items-center justify-center ${dimBg}`}>
+        <svg class={`w-3.5 h-3.5 ${accent}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d={icon}/>
+        </svg>
+      </div>
     )}
   </div>
-  <span class={`text-3xl font-medium ${valueClass}`}>{value}</span>
-  <div class="flex items-center justify-between">
-    {sub && <span class="text-xs text-eco-text-secondary">{sub}</span>}
-    {trend && <span class={`text-xs font-medium ${trendClass}`}>{trend}</span>}
+  <span class={`mono text-3xl font-medium ${accent}`}>{value}</span>
+  <div class="flex items-center justify-between border-t border-eco-border pt-3">
+    {sub && <span class="text-xs text-eco-text-muted">{sub}</span>}
+    {trend && <span class={`text-xs font-medium mono ${accent}`}>{trend}</span>}
   </div>
 </div>
