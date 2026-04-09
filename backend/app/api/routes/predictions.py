@@ -4,11 +4,12 @@ from fastapi import APIRouter, HTTPException
 
 from app.models.schemas import ContainerPrediction, ModelStatus, PredictionResponse
 from app.services.prediction import (
+    MIN_TRAINING_SAMPLES,
+    _build_training_set,
     container_history,
     predict_all,
     predict_container,
     predictor,
-    _build_training_set,
 )
 
 router = APIRouter()
@@ -46,7 +47,7 @@ async def get_model_status():
 async def force_retrain():
     """Manually trigger model retraining."""
     X, y = _build_training_set(container_history)
-    if len(X) < 10:
+    if len(X) < MIN_TRAINING_SAMPLES:
         raise HTTPException(status_code=400, detail="Datos insuficientes para entrenar")
     metrics = predictor.train(X, y)
     return {"status": "retrained", **metrics}

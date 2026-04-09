@@ -1,7 +1,9 @@
 """Prediction service: historical buffer, MLP model, and fill-level forecasting."""
 
+import logging
 import math
 import random
+from bisect import bisect_left
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -9,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from sklearn.neural_network import MLPRegressor
 
 from app.models.schemas import ContainerReading
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -18,6 +22,8 @@ ZONE_MAP = {"centro": 0, "norte": 1, "sur": 2}
 
 # Fill rates per hour by zone (base, before time-of-day modulation)
 ZONE_FILL_RATES = {"centro": 0.035, "norte": 0.025, "sur": 0.020}
+
+MIN_TRAINING_SAMPLES = 50
 
 
 @dataclass
@@ -38,7 +44,7 @@ container_history: dict[str, deque[HistoricalReading]] = {}
 
 def _extract_features(
     reading: HistoricalReading,
-    history: deque[HistoricalReading],
+    history: deque[HistoricalReading] | list[HistoricalReading],
 ) -> list[float]:
     """Extract 7 features from a reading + its history context."""
     ts = reading.timestamp
@@ -71,7 +77,7 @@ def _extract_features(
 
 def _compute_fill_rate(
     current: HistoricalReading,
-    history: deque[HistoricalReading],
+    history: deque[HistoricalReading] | list[HistoricalReading],
     lookback_minutes: int = 30,
 ) -> float:
     """Compute fill change per hour using recent history."""
@@ -87,27 +93,27 @@ def _compute_fill_rate(
             break
 
     if past is None:
-        # Use oldest available
         past = history[0]
 
-    dt_hours = (current.timestamp - past.timestamp).total_seconds() / 3600
-    if dt_hours < 0.001:
+    dt_seconds = (current.timestamp - past.timestamp).total_seconds()
+    if dt_seconds < 1.0:
         return 0.0
 
-    return (current.fill_level - past.fill_level) / dt_hours
+    return (current.fill_level - past.fill_level) / (dt_seconds / 3600)
 
 
 # ---------------------------------------------------------------------------
 # Training data construction
 # ---------------------------------------------------------------------------
 
-DOWNSAMPLE_STEP = 60  # use every 60th reading for training (~10 min intervals)
+# Downsample: use readings every ~10 minutes for training
+DOWNSAMPLE_INTERVAL = timedelta(minutes=10)
 
 
 def _build_training_set(
     history: dict[str, deque[HistoricalReading]],
 ) -> tuple[list[list[float]], list[float]]:
-    """Build (X, y) pairs by matching readings 24h apart."""
+    """Build (X, y) pairs by matching readings 24h apart using binary search."""
     X: list[list[float]] = []
     y: list[float] = []
 
@@ -117,25 +123,41 @@ def _build_training_set(
         if n < 10:
             continue
 
-        for i in range(0, n, DOWNSAMPLE_STEP):
-            r = readings_list[i]
-            target_time = r.timestamp + timedelta(hours=24)
+        # Extract timestamps for binary search
+        timestamps = [r.timestamp for r in readings_list]
 
-            # Find closest reading to target_time
+        # Downsample by time, not index
+        last_sampled: datetime | None = None
+
+        for i in range(n):
+            r = readings_list[i]
+
+            # Skip if too close to last sampled reading
+            if last_sampled is not None and (r.timestamp - last_sampled) < DOWNSAMPLE_INTERVAL:
+                continue
+            last_sampled = r.timestamp
+
+            # Find the reading closest to t + 24h via binary search
+            target_time = r.timestamp + timedelta(hours=24)
+            j = bisect_left(timestamps, target_time)
+
+            # Check neighbors j-1 and j for closest match
             best = None
-            best_diff = timedelta(hours=2)  # max tolerance: 2h
-            for j in range(i + 1, n):
-                diff = abs(readings_list[j].timestamp - target_time)
-                if diff < best_diff:
-                    best_diff = diff
-                    best = readings_list[j]
-                elif readings_list[j].timestamp > target_time + timedelta(hours=2):
-                    break
+            best_diff = timedelta(hours=2)  # max tolerance
+            for candidate in (j - 1, j):
+                if 0 <= candidate < n and candidate != i:
+                    diff = abs(timestamps[candidate] - target_time)
+                    if diff < best_diff:
+                        best_diff = diff
+                        best = candidate
 
             if best is not None:
-                features = _extract_features(r, deque(readings_list[max(0, i - 200):i + 1]))
+                # Build history context: up to 200 readings before index i
+                context_start = max(0, i - 200)
+                context = readings_list[context_start:i + 1]
+                features = _extract_features(r, context)
                 X.append(features)
-                y.append(best.fill_level)
+                y.append(readings_list[best].fill_level)
 
     return X, y
 
@@ -147,7 +169,16 @@ def _build_training_set(
 
 class FillLevelPredictor:
     def __init__(self):
-        self.model: MLPRegressor | None = None
+        self.model = MLPRegressor(
+            hidden_layer_sizes=(32, 16),
+            activation="relu",
+            solver="adam",
+            max_iter=200,
+            early_stopping=True,
+            validation_fraction=0.15,
+            random_state=42,
+            warm_start=True,
+        )
         self.is_trained: bool = False
         self.training_samples_count: int = 0
         self.last_trained_at: datetime | None = None
@@ -157,19 +188,8 @@ class FillLevelPredictor:
 
     def train(self, X: list[list[float]], y: list[float]) -> dict:
         """Train or retrain the model. Returns metrics."""
-        if len(X) < 10:
+        if len(X) < MIN_TRAINING_SAMPLES:
             return {"error": "Not enough data", "samples": len(X)}
-
-        self.model = MLPRegressor(
-            hidden_layer_sizes=(32, 16),
-            activation="relu",
-            solver="adam",
-            max_iter=200,
-            early_stopping=True,
-            validation_fraction=0.15,
-            random_state=42,
-            warm_start=self.is_trained,
-        )
 
         self.model.fit(X, y)
         self.is_trained = True
@@ -178,6 +198,11 @@ class FillLevelPredictor:
         self.loss = float(self.model.loss_)
         self._readings_since_last_train = 0
 
+        logger.info(
+            "[Prediction] Trained on %d samples, loss=%.4f, iterations=%d",
+            len(X), self.loss, self.model.n_iter_,
+        )
+
         return {
             "samples": len(X),
             "loss": self.loss,
@@ -185,7 +210,7 @@ class FillLevelPredictor:
         }
 
     def predict(self, features: list[list[float]]) -> list[float]:
-        if not self.is_trained or self.model is None:
+        if not self.is_trained:
             raise ValueError("Model not trained yet")
         return self.model.predict(features).tolist()
 
@@ -206,6 +231,13 @@ predictor = FillLevelPredictor()
 MAX_HISTORY_PER_CONTAINER = 26000  # ~72h at 10s intervals
 
 
+def _ensure_utc(ts: datetime) -> datetime:
+    """Ensure a datetime is timezone-aware (UTC)."""
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
 def append_reading(reading: ContainerReading) -> None:
     """Append a ContainerReading to the history buffer."""
     cid = reading.container_id
@@ -213,14 +245,15 @@ def append_reading(reading: ContainerReading) -> None:
         container_history[cid] = deque(maxlen=MAX_HISTORY_PER_CONTAINER)
 
     try:
-        ts = datetime.fromisoformat(reading.timestamp)
+        ts = _ensure_utc(datetime.fromisoformat(reading.timestamp))
     except (ValueError, TypeError):
+        logger.warning("Malformed timestamp for %s: %r, using now()", cid, reading.timestamp)
         ts = datetime.now(timezone.utc)
 
     container_history[cid].append(
         HistoricalReading(
             container_id=cid,
-            fill_level=reading.fill_level,
+            fill_level=max(0.0, min(1.0, reading.fill_level)),
             zone=reading.zone,
             timestamp=ts,
         )
@@ -233,7 +266,7 @@ def maybe_retrain() -> dict | None:
     if not predictor.should_retrain():
         return None
     X, y = _build_training_set(container_history)
-    if len(X) < 100:
+    if len(X) < MIN_TRAINING_SAMPLES:
         return None
     return predictor.train(X, y)
 
@@ -323,11 +356,15 @@ def predict_container(container_id: str, threshold: float = 0.8) -> dict | None:
     estimated_full_at = None
     if fill_rate > 0.001 and latest.fill_level < threshold:
         estimated_hours = round((threshold - latest.fill_level) / fill_rate, 1)
-        estimated_full_at = (
-            datetime.now(timezone.utc) + timedelta(hours=estimated_hours)
-        ).isoformat()
+        # Cap at reasonable max to avoid absurd estimates
+        if estimated_hours > 720:  # 30 days
+            estimated_hours = None
+        else:
+            estimated_full_at = (
+                datetime.now(timezone.utc) + timedelta(hours=estimated_hours)
+            ).isoformat()
 
-    # Confidence
+    # Confidence: high if model and linear extrapolation agree
     if fill_rate > 0.001 and estimated_hours is not None:
         model_says_full = predicted_24h >= threshold
         linear_says_full = estimated_hours <= 24
